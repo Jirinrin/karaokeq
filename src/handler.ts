@@ -29,13 +29,13 @@ export default class Handler {
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
     if (is('POST',  'request'))   return this.requestSong(body.songId)
+    if (method == 'OPTIONS')      return null
     // Admin handlers
     if (is('POST',  'reset'))     return this.adminResetQueue()
     if (is('POST',  'setvotes'))  return this.adminSetVotes(body.songId, body.votes)
     if (is('POST',  'q'))         return this.adminSetQueue(body.q)
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
-    if (method == 'OPTIONS')      return null
 
 		throw new Response("Unknown method/path :(", {status: 404})
   }
@@ -136,7 +136,7 @@ export default class Handler {
   private async setVotes(updatedSong: QItem, q: Q): Promise<Q> {
     this.validateQItem(updatedSong)
     const withUpdatedVote = (q ?? await this.getQ()).map(s => s.id === updatedSong.id ? updatedSong : s)
-    const withUpdatedSort = [withUpdatedVote[0], ...withUpdatedVote.slice(1,2), ...withUpdatedVote.slice(2).sort()]
+    const withUpdatedSort = [withUpdatedVote[0], ...withUpdatedVote.slice(1,2), ...withUpdatedVote.slice(2).sort((a,b) => b.votes.length-a.votes.length)]
     return this.setQ(withUpdatedSort)
   }
 
