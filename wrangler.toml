@@ -1,0 +1,8 @@
+name = "karaokeq"
+main = "src/index.ts"
+compatibility_date = "2022-09-10"
+
+[[kv_namespaces]]
+  binding = "KARAOKEQ"
+  id = "0e999fcef5e94b72b3b5d9d9b9d1ba30"
+  preview_id = "0e999fcef5e94b72b3b5d9d9b9d1ba30"
