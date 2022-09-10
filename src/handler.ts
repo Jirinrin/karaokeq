@@ -1,9 +1,5 @@
 import songlist from './songlist.json'
-import { Env, Method } from "./types";
-
-type VoteToken = `${string}_${string}` // username_sessiontoken
-type QItem = {id: string; votes: VoteToken[]}
-type Q = QItem[]
+import { Env, Method, Q, QItem, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist])
@@ -39,6 +35,7 @@ export default class Handler {
     if (is('POST',  'q'))         return this.adminSetQueue(body.q)
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
+    if (method == 'OPTIONS')      return null
 
 		throw new Response("Unknown method/path :(", {status: 404})
   }

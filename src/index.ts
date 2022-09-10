@@ -24,14 +24,23 @@ export default {
 			
 		try {
 			const reqMethod = request.method as Method
-			const reqBody = request.body ? await request.json() : undefined
+			// console.log('ya', request.body.)
+			const reqBody = request.body && reqMethod !== 'OPTIONS' ? await request.json() : undefined
 			const userName = request.headers.get('Q-User-Name')
 			const sessionToken = request.headers.get('Q-Session')
 
 			const handler = new Handler(env, domain, userName, sessionToken)
 			const result = await handler.handleRequest(reqMethod, reqPath, reqBody)
 			const resultStr: string = typeof result === 'object' ? JSON.stringify(result) : result && `${result}`
-			return new Response(resultStr)
+			
+			const corsHeaders = {
+				'Access-Control-Allow-Origin': '*',
+				'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
+				'Access-Control-Max-Age': '86400',
+				'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') ?? '',
+			};
+
+			return new Response(resultStr, {headers: {...corsHeaders}})
 		} catch (err) {
 			if (err instanceof Response) {
 				console.warn('Expected error', err)
