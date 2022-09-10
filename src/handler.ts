@@ -6,7 +6,7 @@ type QItem = {id: string; votes: VoteToken[]}
 type Q = QItem[]
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
-const availableSongIds = Object.values(songlist).flat()
+const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist])
 
 export default class Handler {
   private kv: KVNamespace;
