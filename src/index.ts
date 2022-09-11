@@ -21,7 +21,14 @@ export default {
 		const [match, domain, reqPath] = url.pathname.match(/\/([^\/]+)\/([^\/]+)/) ?? []
 		if (!match)
 			return new Response("Invalid request: path must look like e.g. /:domain/:path", {status: 400})
-			
+
+		const corsHeaders = {
+			'Access-Control-Allow-Origin': '*',
+			'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
+			'Access-Control-Max-Age': '86400',
+			'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') ?? '',
+		};
+
 		try {
 			const reqMethod = request.method as Method
 			// console.log('ya', request.body.)
@@ -33,22 +40,15 @@ export default {
 			const result = await handler.handleRequest(reqMethod, reqPath, reqBody)
 			const resultStr: string = typeof result === 'object' ? JSON.stringify(result) : result && `${result}`
 			
-			const corsHeaders = {
-				'Access-Control-Allow-Origin': '*',
-				'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
-				'Access-Control-Max-Age': '86400',
-				'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') ?? '',
-			};
-
 			return new Response(resultStr, {headers: {...corsHeaders}})
 		} catch (err) {
 			if (err instanceof SimpleResponse) {
 				console.warn('Expected error', err.message)
 				// todo: it seems as if at this point err.text() or err.json() etc. has already been used? Maybe for the instanceof assessment...?
-				return err
+				return err.withHeaders(corsHeaders)
 			} else {
 				console.error('Internal error', err)
-				return new Response(`${err}`, {status: 500})
+				return new SimpleResponse(`${err}`, 500, {headers: corsHeaders})
 			}
 		}
 	},

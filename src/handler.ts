@@ -8,8 +8,12 @@ const fillSong = 'Rick Astley : Never Gonna Give You Up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
 
 export class SimpleResponse extends Response {
-  constructor(public message: string, status: number) {
-    super(message, {status})
+  constructor(public message: string, status: number, init: ResponseInit|Response = {}) {
+    super(message, {status, ...init})
+  }
+  
+  withHeaders(headers: Record<string, string>): SimpleResponse {
+    return new SimpleResponse(this.message, this.status, {headers: {...this.headers, ...headers}})
   }
 }
 
