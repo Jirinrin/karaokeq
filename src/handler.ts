@@ -1,11 +1,13 @@
 import songlist from './songlist.json'
-import { Env, Method, Q, QItem, VoteToken } from "./types";
+import { Env, Method, Q, QItem, RateLimitLookup, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist])
 
 const fillSong = 'Rick Astley : Never Gonna Give You Up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
+
+const keyRequestRateLimitMins = 'requestRateLimitMins'
 
 export class SimpleResponse extends Response {
   constructor(public message: string, status: number, init: ResponseInit|Response = {}) {
@@ -24,7 +26,11 @@ export default class Handler {
 
   private get qKey(): string { return `q_${this.domain}` }
   private get aKey(): string { return `a_${this.domain}` }
+  private get rKey(): string { return `r_${this.domain}` }
   private get votingToken(): VoteToken { return `${this.userName}_${this.sessionToken}` }
+
+  private _requestRateLimitMins: number|null = null
+  private async requestRateLimitMins(): Promise<number> { return this._requestRateLimitMins ??= (await this.kv.get<number>(keyRequestRateLimitMins, 'json') ?? 0) }
 
   constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null) {
     this.kv = env.KARAOKEQ
@@ -49,6 +55,7 @@ export default class Handler {
     if (is('POST',  'q'))         return this.adminSetQueue(body.q)
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
+    if (is('POST',  'req-rate-limit')) return this.adminSetRequestRateLimit(body.minutes)
 
 		throw new SimpleResponse("Unknown method/path :(", 404)
   }
@@ -113,10 +120,17 @@ export default class Handler {
     if (q.find(s => s.id === id))
       throw new SimpleResponse('Song already in queue: ' + id, 400)
 
-    // if (false)
-    //   throw new SimpleResponse('You need to wait a minute in between song requests', 429)
-    // todo: rate limiting? (later on)
-
+    const reqLimitMins = await this.requestRateLimitMins()
+    if (reqLimitMins > 0) {
+      const r = await this.kv.get<RateLimitLookup>(this.rKey, 'json') ?? {}
+      const lastUpdateBySession = r[this.sessionToken]
+      const now = Date.now()
+      if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*reqLimitMins)
+        throw new SimpleResponse(`You need to wait ${reqLimitMins} minute${reqLimitMins === 1 ? '' : 's'} in between song requests`, 429)
+      r[this.sessionToken] = now
+      await this.kv.put(this.rKey, JSON.stringify(r))
+    }
+    
     return this.setQ([...q, {id, votes: [this.votingToken]}])
   }
 
@@ -139,6 +153,7 @@ export default class Handler {
     return this.setVotes({id: songId, votes: Array(votes).fill(null).map(() => this.votingToken)}, q)
   })
   adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => this.setQ(q.map(s => this.validateQItem(s, true))))
+  adminSetRequestRateLimit = this.adminHandler(async (mins: number): Promise<void> => this.kv.put(keyRequestRateLimitMins, mins.toString()))
   adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.kv.delete(this.qKey))
   adminAuthorize = this.adminHandler(async () => {}) // This method exists purely to validate whether we can show the admin dashboard
 
