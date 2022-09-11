@@ -1,5 +1,6 @@
 export interface Env {
-	KARAOKEQ: KVNamespace;
+	KARAOKEQ: KVNamespace
+	API_TOKEN: string
 }
 
 export type Method = 'GET'|'POST'|'PUT'|'DELETE'|'OPTIONS'

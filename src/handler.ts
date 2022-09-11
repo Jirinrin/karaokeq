@@ -20,9 +20,10 @@ export class SimpleResponse extends Response {
 }
 
 export default class Handler {
-  private kv: KVNamespace;
-  private userName: string;
-  private sessionToken: string;
+  private kv: KVNamespace
+  private userName: string
+  private sessionToken: string
+  private apiToken: string
 
   private get qKey(): string { return `q_${this.domain}` }
   private get aKey(): string { return `a_${this.domain}` }
@@ -34,6 +35,7 @@ export default class Handler {
 
   constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null) {
     this.kv = env.KARAOKEQ
+    this.apiToken = env.API_TOKEN
     this.userName = userName ?? ''
     // todo: maybe also expect admin token separately? Or maybe just recommend the user to use a difficult to guess username on the queue creation thing
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
@@ -199,12 +201,23 @@ export default class Handler {
   }
 
   private async setQ(q: Q): Promise<Q> {
-    await this.kv.put(this.qKey, JSON.stringify(q))
+    await this.writeKvCacheSafe(this.qKey, JSON.stringify(q))
     return q
   }
 
   private async isAdmin(): Promise<boolean> {
     const expected = await this.kv.get(this.aKey, {cacheTtl: 3600})
     return !!expected && expected === this.userName
+  }
+
+  private async writeKvCacheSafe(k: string, v: string): Promise<Response> {
+    return await fetch(`https://api.cloudflare.com/client/v4/accounts/a749e80806effd7d6afcdd7a0b7d5129/storage/kv/namespaces/0e999fcef5e94b72b3b5d9d9b9d1ba30/values/${k}`, {
+      method: 'PUT',
+      body: v,
+      headers: {
+        'Authorization': `Bearer ${this.apiToken}`,
+        'Content-Type': 'application/json'
+      },
+    });
   }
 }
