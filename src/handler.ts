@@ -2,7 +2,7 @@ import songlist from './songlist.json'
 import { Env, Method, Q, QItem, RateLimitLookup, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
-const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist])
+const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).sort()
 
 const fillSong = 'Rick Astley : Never Gonna Give You Up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
@@ -80,9 +80,8 @@ export default class Handler {
 
     let q = await this.getQ()
     const currentSongIndex = q.findIndex(s => s.id === currentSongId)
-    // todo: this can have some weird behaviour: e.g. if another song slipped past the current song in the meanwhile, it'll be skipped altogether :()
-    // or even more relevant: computer lost internet for a little bit and now it's gone through a bunch of the playlist and skipped past certain votes etc.
-    if (currentSongIndex === -1) {
+    if (currentSongIndex === -1 && currentSongId !== availableSongIds[0] && currentSongId !== fillSong) {
+      // currentSongId not found in queue -> adding it to the front
       q = [{id: currentSongId, votes: ['admin_']}, ...q]
       await this.setQ(q)
     } else if (currentSongIndex > -1) {
