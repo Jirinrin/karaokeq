@@ -47,7 +47,9 @@ export default class Handler {
   }
 
   async getSimpleQueue(): Promise<string> {
-    return (await this.getQ()).map(s => s.id).join('\n')
+    // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
+    // return (await this.getQ()).map(s => s.id).join('\n') + '\nRick Astley : Never Gonna Give You Up'.repeat(10)
+    return (await this.getQ()).map(s => s.id).join('\n') + '\nYumi Kimura : Itsumo Nando Demo'.repeat(10)
   }
 
   async getQueue(): Promise<Q> {
@@ -72,7 +74,8 @@ export default class Handler {
       q = q.slice(currentSongIndex)
       await this.setQ(q)
     }
-    return q.map(s => s.id).join('\n')
+    // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
+    return q.map(s => s.id).join('\n') + '\nYumi Kimura : Itsumo Nando Demo'.repeat(10)
   }
 
   async createQueue(initial: Q = []): Promise<Q> {
