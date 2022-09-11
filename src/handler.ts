@@ -30,7 +30,7 @@ export default class Handler {
   private get votingToken(): VoteToken { return `${this.userName}_${this.sessionToken}` }
 
   private _requestRateLimitMins: number|null = null
-  private async requestRateLimitMins(): Promise<number> { return this._requestRateLimitMins ??= (await this.kv.get<number>(keyRequestRateLimitMins, 'json') ?? 0) }
+  private async requestRateLimitMins(): Promise<number> { return this._requestRateLimitMins ??= (await this.kv.get<number>(keyRequestRateLimitMins, {type: 'json', cacheTtl: 300}) ?? 0) }
 
   constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null) {
     this.kv = env.KARAOKEQ
@@ -103,7 +103,7 @@ export default class Handler {
   }
 
   async createQueue(initial: Q = []): Promise<Q> {
-    if (await this.kv.get(this.qKey))
+    if (await this.getQ())
       throw new SimpleResponse('Domain already exists', 400)
 
     if (this.userName)
@@ -146,7 +146,7 @@ export default class Handler {
   private adminHandler = <CB extends (...args: any[]) => Promise<any>>(cb: CB): CB => 
     (async (...args: Parameters<CB>) => {
       // todo: Nicely bodged but of course this could be more 'secure' if I'd want it to be
-      const expectedUserName = await this.kv.get(this.aKey)
+      const expectedUserName = await this.kv.get(this.aKey, {cacheTtl: 3600})
       if (!expectedUserName)
         throw new SimpleResponse('No admin token exists for this queue', 403)
       if (expectedUserName !== this.userName)
@@ -185,7 +185,7 @@ export default class Handler {
   }
 
   private async getQ(): Promise<Q> {
-    const q = await this.kv.get<Q>(this.qKey, 'json')
+    const q = await this.kv.get<Q>(this.qKey, {type: 'json'})
     if (!q)
       throw new SimpleResponse("Queue not found", 404)
     return q
@@ -204,8 +204,7 @@ export default class Handler {
   }
 
   private async isAdmin(): Promise<boolean> {
-    const expected = await this.kv.get(this.aKey)
+    const expected = await this.kv.get(this.aKey, {cacheTtl: 3600})
     return !!expected && expected === this.userName
   }
 }
-
