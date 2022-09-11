@@ -4,6 +4,9 @@ import { Env, Method, Q, QItem, VoteToken } from "./types";
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist])
 
+const fillSong = 'Rick Astley : Never Gonna Give You Up'
+// const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
+
 export class SimpleResponse extends Response {
   constructor(public message: string, status: number) {
     super(message, {status})
@@ -48,8 +51,7 @@ export default class Handler {
 
   async getSimpleQueue(): Promise<string> {
     // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
-    // return (await this.getQ()).map(s => s.id).join('\n') + '\nRick Astley : Never Gonna Give You Up'.repeat(10)
-    return (await this.getQ()).map(s => s.id).join('\n') + '\nYumi Kimura : Itsumo Nando Demo'.repeat(10)
+    return (await this.getQ()).map(s => s.id).join('\n') + `\n${fillSong}`.repeat(10)
   }
 
   async getQueue(): Promise<Q> {
@@ -67,6 +69,8 @@ export default class Handler {
 
     let q = await this.getQ()
     const currentSongIndex = q.findIndex(s => s.id === currentSongId)
+    // todo: this can have some weird behaviour: e.g. if another song slipped past the current song in the meanwhile, it'll be skipped altogether :()
+    // or even more relevant: computer lost internet for a little bit and now it's gone through a bunch of the playlist and skipped past certain votes etc.
     if (currentSongIndex === -1) {
       q = [{id: currentSongId, votes: ['admin_']}, ...q]
       await this.setQ(q)
@@ -75,7 +79,7 @@ export default class Handler {
       await this.setQ(q)
     }
     // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
-    return q.map(s => s.id).join('\n') + '\nYumi Kimura : Itsumo Nando Demo'.repeat(10)
+    return q.map(s => s.id).join('\n') + `\n${fillSong}`.repeat(10)
   }
 
   async createQueue(initial: Q = []): Promise<Q> {
