@@ -121,7 +121,7 @@ export default class Handler {
       throw new SimpleResponse('Song already in queue: ' + id, 400)
 
     const reqLimitMins = await this.requestRateLimitMins()
-    if (reqLimitMins > 0) {
+    if (reqLimitMins > 0 && !(await this.isAdmin())) {
       const r = await this.kv.get<RateLimitLookup>(this.rKey, 'json') ?? {}
       const lastUpdateBySession = r[this.sessionToken]
       const now = Date.now()
@@ -192,6 +192,11 @@ export default class Handler {
   private async setQ(q: Q): Promise<Q> {
     await this.kv.put(this.qKey, JSON.stringify(q))
     return q
+  }
+
+  private async isAdmin(): Promise<boolean> {
+    const expected = await this.kv.get(this.aKey)
+    return !!expected && expected === this.userName
   }
 }
 
