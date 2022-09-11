@@ -4,6 +4,12 @@ import { Env, Method, Q, QItem, VoteToken } from "./types";
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist])
 
+export class SimpleResponse extends Response {
+  constructor(public message: string, status: number) {
+    super(message, {status})
+  }
+}
+
 export default class Handler {
   private kv: KVNamespace;
   private userName: string;
@@ -24,7 +30,7 @@ export default class Handler {
     const is = (m: Method, p: string) => method == m && path == p
 
     if (is('GET',   'q-simple'))  return this.getSimpleQueue()
-    if (is('PUT',   'q-simple'))  return this.getUpdatedSimpleQueue(body.currentSongId)
+    if (is('POST',  'q-simple'))  return this.getUpdatedSimpleQueue(body.currentSongId)
     if (is('GET',   'q'))         return this.getQueue()
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
@@ -37,7 +43,7 @@ export default class Handler {
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
 
-		throw new Response("Unknown method/path :(", {status: 404})
+		throw new SimpleResponse("Unknown method/path :(", 404)
   }
 
   async getSimpleQueue(): Promise<string> {
@@ -55,7 +61,7 @@ export default class Handler {
 
   async getUpdatedSimpleQueue(currentSongId: string): Promise<string> {
     if (typeof currentSongId != 'string')
-      throw new Response('No currentSongId specified', {status: 400})
+      throw new SimpleResponse('No currentSongId specified', 400)
 
     let q = await this.getQ()
     const currentSongIndex = q.findIndex(s => s.id === currentSongId)
@@ -68,7 +74,7 @@ export default class Handler {
 
   async createQueue(initial: Q = []): Promise<Q> {
     if (await this.kv.get(this.qKey))
-      throw new Response('Domain already exists', {status: 400})
+      throw new SimpleResponse('Domain already exists', 400)
 
     if (this.userName)
       await this.kv.put(this.aKey, this.userName)
@@ -81,7 +87,7 @@ export default class Handler {
     const s = await this.getSongInQ(id, q)
 
     if (s.votes.includes(this.votingToken))
-      throw new Response('You already voted on this song', {status: 405})
+      throw new SimpleResponse('You already voted on this song', 405)
 
     return this.setVotes({id, votes: s.votes.concat(this.votingToken)}, q)
   }
@@ -91,10 +97,10 @@ export default class Handler {
     
     const q = await this.getQ()
     if (q.find(s => s.id === id))
-      throw new Response('Song already in queue: ' + id, {status: 400})
+      throw new SimpleResponse('Song already in queue: ' + id, 400)
 
     // if (false)
-    //   throw new Response('You need to wait a minute in between song requests')
+    //   throw new SimpleResponse('You need to wait a minute in between song requests', 429)
     // todo: rate limiting? (later on)
 
     return this.setQ([...q, {id, votes: [this.votingToken]}])
@@ -105,15 +111,15 @@ export default class Handler {
       // todo: Nicely bodged but of course this could be more 'secure' if I'd want it to be
       const expectedUserName = await this.kv.get(this.aKey)
       if (!expectedUserName)
-        throw new Response('No admin token exists for this queue', {status: 403})
+        throw new SimpleResponse('No admin token exists for this queue', 403)
       if (expectedUserName !== this.userName)
-        throw new Response('Incorrect admin token', {status: 403})
+        throw new SimpleResponse('Incorrect admin token', 403)
       return cb(...args)
     }) as CB
 
   adminResetQueue = this.adminHandler(async (): Promise<Q> => this.setQ([]))
   adminSetVotes = this.adminHandler(async (songId: string, votes: number): Promise<Q> => {
-    if (typeof votes !== 'number') throw new Response('votes must be number', {status: 422})
+    if (typeof votes !== 'number') throw new SimpleResponse('votes must be number', 422)
     const q = await this.getQ()
     await this.getSongInQ(songId, q) // validation that the song exists
     return this.setVotes({id: songId, votes: Array(votes).fill(null).map(() => this.votingToken)}, q)
@@ -124,13 +130,13 @@ export default class Handler {
 
   private validateQItem(s: QItem, validateAvailable = false): QItem {
     if (typeof s.id !== 'string' || !s.votes.every(v => v.match(/_/)))
-      throw new Response('Invalid q item: ' + JSON.stringify(s), {status: 422})
+      throw new SimpleResponse('Invalid q item: ' + JSON.stringify(s), 422)
     if (validateAvailable) this.validateSongAvailable(s.id)
     return s
   }
   private validateSongAvailable(id: string) {
     if (!availableSongIds.includes(id))
-      throw new Response('Song not available: ' + id, {status: 404})
+      throw new SimpleResponse('Song not available: ' + id, 404)
   }
 
   private async setVotes(updatedSong: QItem, q: Q): Promise<Q> {
@@ -143,14 +149,14 @@ export default class Handler {
   private async getQ(): Promise<Q> {
     const q = await this.kv.get<Q>(this.qKey, 'json')
     if (!q)
-      throw new Response("Queue not found", {status: 404})
+      throw new SimpleResponse("Queue not found", 404)
     return q
   }
 
   private async getSongInQ(id: string, q?: Q): Promise<QItem> {
     const song = (q ?? await this.getQ()).find(s => s.id === id)
     if (!song)
-      throw new Response('Song not found in queue', {status: 404})
+      throw new SimpleResponse('Song not found in queue', 404)
     return song
   }
 

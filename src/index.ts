@@ -8,7 +8,7 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import Handler from "./handler";
+import Handler, { SimpleResponse } from "./handler";
 import { Env, Method } from "./types";
 
 export default {
@@ -42,8 +42,9 @@ export default {
 
 			return new Response(resultStr, {headers: {...corsHeaders}})
 		} catch (err) {
-			if (err instanceof Response) {
-				console.warn('Expected error', err)
+			if (err instanceof SimpleResponse) {
+				console.warn('Expected error', err.message)
+				// todo: it seems as if at this point err.text() or err.json() etc. has already been used? Maybe for the instanceof assessment...?
 				return err
 			} else {
 				console.error('Internal error', err)
