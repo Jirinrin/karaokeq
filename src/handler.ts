@@ -39,11 +39,11 @@ export default class Handler {
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
   }
 
-  async handleRequest(method: Method, path: string, body?: any): Promise<any> {
+  async handleRequest(method: Method, path: string, body: any = {}): Promise<any> {
     const is = (m: Method, p: string) => method == m && path == p
 
     if (is('GET',   'q-simple'))  return this.getSimpleQueue()
-    if (is('POST',  'q-simple'))  return this.getUpdatedSimpleQueue(body.currentSongId)
+    if (is('POST',  'q-simple'))  return this.getUpdatedSimpleQueue(body.currentSongId, body.songIdHistory ?? [])
     if (is('GET',   'q'))         return this.getQueue()
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
@@ -74,7 +74,7 @@ export default class Handler {
   //   return this.getQ()
   // }
 
-  async getUpdatedSimpleQueue(currentSongId: string): Promise<string> {
+  async getUpdatedSimpleQueue(currentSongId: string, songIdHistory: string[]): Promise<string> {
     if (typeof currentSongId != 'string')
       throw new SimpleResponse('No currentSongId specified', 400)
 
@@ -84,8 +84,18 @@ export default class Handler {
       // currentSongId not found in queue -> adding it to the front
       q = [{id: currentSongId, votes: ['admin_']}, ...q]
       await this.setQ(q)
-    } else if (currentSongIndex > -1) {
-      q = q.slice(currentSongIndex)
+    } else if (currentSongIndex > 0) {
+      // currentSongId found later in the queue than the first place ->
+      // go through the songs before the current song in the queue (this will usually be nothing, but in case a song was played after an internet outage etc.),
+      // and remove them from the queue if they have already been played in the last 5 or so songs
+      const qCopy = [...q] as (QItem|null)[]
+      for (let i = 0; i < currentSongIndex; i++) {
+        if (songIdHistory.includes(q[i].id))
+          qCopy[i] = null
+      }
+      q = qCopy.filter((s): s is QItem => !!s)
+      // always move current song to front
+      q = [{id: currentSongId, votes: ['admin_']}, ...q.filter(s => s.id !== currentSongId)]
       await this.setQ(q)
     }
     // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
