@@ -65,7 +65,10 @@ export default class Handler {
 
     let q = await this.getQ()
     const currentSongIndex = q.findIndex(s => s.id === currentSongId)
-    if (currentSongIndex > -1) {
+    if (currentSongIndex === -1) {
+      q = [{id: currentSongId, votes: ['admin_']}, ...q]
+      await this.setQ(q)
+    } else if (currentSongIndex > -1) {
       q = q.slice(currentSongIndex)
       await this.setQ(q)
     }
