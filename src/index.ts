@@ -8,8 +8,9 @@
  * Learn more at https://developers.cloudflare.com/workers/
  */
 
-import Handler, { SimpleResponse } from "./handler";
-import { Env, Method } from "./types";
+import Handler from "./handler";
+import { handleError, handleResult, parseReqInfo } from "./reqUtils";
+import { Env } from "./types";
 
 export default {
 	async fetch(
@@ -17,39 +18,25 @@ export default {
 		env: Env,
 		ctx: ExecutionContext,
 	): Promise<Response> {
-		const url = new URL(request.url)
-		const [match, domain, reqPath] = url.pathname.match(/\/([^\/]+)\/([^\/]+)/) ?? []
-		if (!match)
-			return new Response("Invalid request: path must look like e.g. /:domain/:path", {status: 400})
-
 		const corsHeaders = {
 			'Access-Control-Allow-Origin': '*',
 			'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
 			'Access-Control-Max-Age': '86400',
 			'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') ?? '',
-		};
+		}
 
 		try {
-			const reqMethod = request.method as Method
-			// console.log('ya', request.body.)
-			const reqBody = request.body && reqMethod !== 'OPTIONS' ? await request.json() : undefined
+			const reqInfo = await parseReqInfo(request)
+
 			const userName = request.headers.get('Q-User-Name')
 			const sessionToken = request.headers.get('Q-Session')
 
-			const handler = new Handler(env, domain, userName, sessionToken)
-			const result = await handler.handleRequest(reqMethod, reqPath, reqBody)
-			const resultStr: string = typeof result === 'object' ? JSON.stringify(result) : result && `${result}`
-			
-			return new Response(resultStr, {headers: {...corsHeaders}})
+			const handler = new Handler(env, reqInfo.domain, userName, sessionToken)
+			const result = await handler.handleRequest(reqInfo)
+
+			return handleResult(result, corsHeaders)
 		} catch (err) {
-			if (err instanceof SimpleResponse) {
-				console.warn('Expected error', err.message)
-				// todo: it seems as if at this point err.text() or err.json() etc. has already been used? Maybe for the instanceof assessment...?
-				return err.withHeaders(corsHeaders)
-			} else {
-				console.error('Internal error', err)
-				return new SimpleResponse(`${err}`, 500, {headers: corsHeaders})
-			}
+			return handleError(err, corsHeaders)
 		}
 	},
 }

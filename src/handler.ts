@@ -1,5 +1,7 @@
+import { DbHandler } from './db';
+import { SimpleResponse } from './reqUtils';
 import songlist from './songlist.json'
-import { Env, Method, Q, QItem, RateLimitLookup, VoteToken } from "./types";
+import { Dict, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).sort()
@@ -9,37 +11,31 @@ const fillSong = 'Rick Astley : Never Gonna Give You Up'
 
 const keyRequestRateLimitMins = 'requestRateLimitMins'
 
-export class SimpleResponse extends Response {
-  constructor(public message: string, status: number, init: ResponseInit|Response = {}) {
-    super(message, {status, ...init})
-  }
-  
-  withHeaders(headers: Record<string, string>): SimpleResponse {
-    return new SimpleResponse(this.message, this.status, {headers: {...this.headers, ...headers}})
-  }
-}
-
 export default class Handler {
   private kv: KVNamespace;
   private userName: string;
   private sessionToken: string;
 
-  private get qKey(): string { return `q_${this.domain}` }
   private get aKey(): string { return `a_${this.domain}` }
-  private get rKey(): string { return `r_${this.domain}` }
   private get votingToken(): VoteToken { return `${this.userName}_${this.sessionToken}` }
+  private get now() { return Date.now() }
 
   private _requestRateLimitMins: number|null = null
   private async requestRateLimitMins(): Promise<number> { return this._requestRateLimitMins ??= (await this.kv.get<number>(keyRequestRateLimitMins, {type: 'json', cacheTtl: 300}) ?? 0) }
+
+  private durableB: DurableObjectStub
 
   constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null) {
     this.kv = env.KARAOKEQ
     this.userName = userName ?? ''
     // todo: maybe also expect admin token separately? Or maybe just recommend the user to use a difficult to guess username on the queue creation thing
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
+
+    const dbObjId = env.KARAOKEQ_DB.idFromName('karaokeq_db')
+    this.durableB = env.KARAOKEQ_DB.get(dbObjId)
   }
 
-  async handleRequest(method: Method, path: string, body: any = {}): Promise<any> {
+  async handleRequest({method, path, body}: ReqInfo): Promise<any> {
     const is = (m: Method, p: string) => method == m && path == p
 
     if (is('GET',   'q-simple'))  return this.getSimpleQueue()
@@ -131,13 +127,11 @@ export default class Handler {
 
     const reqLimitMins = await this.requestRateLimitMins()
     if (reqLimitMins > 0 && !(await this.isAdmin())) {
-      const r = await this.kv.get<RateLimitLookup>(this.rKey, 'json') ?? {}
-      const lastUpdateBySession = r[this.sessionToken]
-      const now = Date.now()
+      const {sessionToken, now} = this
+      const lastUpdateBySession = await this.callDb('GET_ratelimit', {sessionToken})
       if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*reqLimitMins)
         throw new SimpleResponse(`You need to wait ${reqLimitMins} minute${reqLimitMins === 1 ? '' : 's'} in between song requests`, 429)
-      r[this.sessionToken] = now
-      await this.kv.put(this.rKey, JSON.stringify(r))
+      await this.callDb('PUT_ratelimit', null, {sessionToken, now})
     }
     
     return this.setQ([...q, {id, votes: [this.votingToken]}])
@@ -163,7 +157,7 @@ export default class Handler {
   })
   adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => this.setQ(q.map(s => this.validateQItem(s, true))))
   adminSetRequestRateLimit = this.adminHandler(async (mins: number): Promise<void> => this.kv.put(keyRequestRateLimitMins, mins.toString()))
-  adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.kv.delete(this.qKey))
+  adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.callDb('DELETE_q'))
   adminAuthorize = this.adminHandler(async () => {}) // This method exists purely to validate whether we can show the admin dashboard
 
   private validateQItem(s: QItem, validateAvailable = false): QItem {
@@ -184,11 +178,8 @@ export default class Handler {
     return this.setQ(withUpdatedSort)
   }
 
-  private async getQ(): Promise<Q> {
-    const q = await this.kv.get<Q>(this.qKey, {type: 'json'})
-    if (!q)
-      throw new SimpleResponse("Queue not found", 404)
-    return q
+  private async getQ() {
+    return this.callDb('GET_q')
   }
 
   private async getSongInQ(id: string, q?: Q): Promise<QItem> {
@@ -199,12 +190,24 @@ export default class Handler {
   }
 
   private async setQ(q: Q): Promise<Q> {
-    await this.kv.put(this.qKey, JSON.stringify(q))
+    await this.callDb('PUT_q', q)
     return q
   }
 
   private async isAdmin(): Promise<boolean> {
     const expected = await this.kv.get(this.aKey, {cacheTtl: 3600})
     return !!expected && expected === this.userName
+  }
+  
+  private async callDb<T extends keyof DbHandler> (call: T, ...args: Parameters<DbHandler[T]>) {
+    const [, method, path] = call.match(/(\w+)_(\w+)/) ?? []
+    const q = method === 'GET' ? args[0] : args[1]
+    const qStr = q ? `?${Object.entries(q as Dict<any>).map(([k,v]) => `${k}=${v}`).join('&')}` : ''
+    const resp = await this.durableB.fetch(`${this.domain}/${path}${qStr}`, {
+      method,
+      body: method !== 'GET' && args[0] ? JSON.stringify(args[0]) : undefined,
+    })
+    // todo: throw error if got error...?
+    return (resp.body ? resp.json() : null) as Awaited<ReturnType<DbHandler[T]>>
   }
 }
