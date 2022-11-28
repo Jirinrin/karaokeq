@@ -24,10 +24,10 @@ export async function parseReqInfoWithParams<P extends `/${string}`>(request: Re
   return { ...reqInfo, pathParams: paramsLookup as PathParamsDict<P> }
 }
 
-export async function parseReqInfo(request: Request): Promise<ReqInfo> {
-  const url = new URL(request.url)
-  const method = request.method as Method
-  const body = (request.headers.get('content-length') ?? 0) > 0 && method !== 'OPTIONS' ? await request.json() : undefined
+export async function parseReqInfo(req: Request): Promise<ReqInfo> {
+  const url = new URL(req.url)
+  const method = req.method as Method
+  const body = (req.headers.get('content-type') || (req.headers.get('content-length') ?? 0) > 0) && method !== 'OPTIONS' ? await req.json() : undefined
   return {
     path: url.pathname.slice(1),
     pathParams: {},

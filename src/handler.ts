@@ -27,7 +27,7 @@ export default class Handler {
 
   private db: DbHandler
 
-  constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null, adminToken: string|null) {
+  constructor(env: Env, baseUrl: string, private domain: string, userName: string|null, sessionToken: string|null, adminToken: string|null) {
     this.kv = env.KARAOKEQ
     this.userName = userName ?? ''
     this.adminToken = adminToken
@@ -35,7 +35,7 @@ export default class Handler {
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
 
     const dbObjId = env.KARAOKEQ_DB.idFromName('karaokeq_db')
-    this.db = makeClientProxy(new DurableBClient(env.KARAOKEQ_DB.get(dbObjId), 'https://karaokeq.q42.workers.dev', {domain}))
+    this.db = makeClientProxy(new DurableBClient(env.KARAOKEQ_DB.get(dbObjId), baseUrl, {domain}))
   }
 
   async handleRequest({method, path, body}: ReqInfo): Promise<any> {
