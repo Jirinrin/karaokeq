@@ -181,7 +181,13 @@ export default class Handler {
 
   private async getQ(): Promise<Q> {
     const q = await this.db.getQ()
-    if (!q) throw new SimpleResponse("Queue not found", 404)
+    if (!q) {
+      // If we can acknowledge that the queue should exist, create it anew again
+      // todo: possibly backup the q from time to time in kv?
+      if (await this.kv.get(this.aKey))
+        return this.setQ([])
+      throw new SimpleResponse("Queue not found", 404)
+    }
     return q
   }
 
