@@ -38,7 +38,7 @@ export async function parseReqInfo(req: Request): Promise<ReqInfo> {
 }
 
 export function handleResult(result: any, corsHeaders: Dict = {}): Response {
-  const resultStr: string|null|undefined = result !== undefined && result !== null ? JSON.stringify(result) : result
+  const resultStr: string|null|undefined = result !== undefined && result !== null && typeof result !== 'string' ? JSON.stringify(result) : result
   return new Response(resultStr, {headers: {...corsHeaders}})
 }
 
