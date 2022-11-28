@@ -1,7 +1,8 @@
 import { DbHandler } from './db';
+import { DurableBClient, makeClientProxy } from './DurableB';
 import { SimpleResponse } from './reqUtils';
-import songlist from './songlist.json'
-import { Dict, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
+import songlist from './songlist.json';
+import { Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).sort()
@@ -23,7 +24,7 @@ export default class Handler {
   private _requestRateLimitMins: number|null = null
   private async requestRateLimitMins(): Promise<number> { return this._requestRateLimitMins ??= (await this.kv.get<number>(keyRequestRateLimitMins, {type: 'json', cacheTtl: 300}) ?? 0) }
 
-  private durableB: DurableObjectStub
+  private db: DbHandler
 
   constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null) {
     this.kv = env.KARAOKEQ
@@ -32,7 +33,7 @@ export default class Handler {
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
 
     const dbObjId = env.KARAOKEQ_DB.idFromName('karaokeq_db')
-    this.durableB = env.KARAOKEQ_DB.get(dbObjId)
+    this.db = makeClientProxy(new DurableBClient(env.KARAOKEQ_DB.get(dbObjId), 'https://karaokeq.q42.workers.dev', {domain}))
   }
 
   async handleRequest({method, path, body}: ReqInfo): Promise<any> {
@@ -48,10 +49,10 @@ export default class Handler {
     // Admin handlers
     if (is('POST',  'reset'))     return this.adminResetQueue()
     if (is('POST',  'setvotes'))  return this.adminSetVotes(body.songId, body.votes)
-    if (is('POST',  'q'))         return this.adminSetQueue(body.q)
+    if (is('PUT',   'q'))         return this.adminSetQueue(body.q)
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
-    if (is('POST',  'req-rate-limit')) return this.adminSetRequestRateLimit(body.minutes)
+    if (is('PUT',   'req-rate-limit')) return this.adminSetRequestRateLimit(body.minutes)
 
 		throw new SimpleResponse("Unknown method/path :(", 404)
   }
@@ -99,7 +100,7 @@ export default class Handler {
   }
 
   async createQueue(initial: Q = []): Promise<Q> {
-    if (await this.getQ())
+    if (await this.db.getQ())
       throw new SimpleResponse('Domain already exists', 400)
 
     if (this.userName)
@@ -128,10 +129,10 @@ export default class Handler {
     const reqLimitMins = await this.requestRateLimitMins()
     if (reqLimitMins > 0 && !(await this.isAdmin())) {
       const {sessionToken, now} = this
-      const lastUpdateBySession = await this.callDb('GET_ratelimit', {sessionToken})
+      const lastUpdateBySession = await this.db.getRatelimit(sessionToken)
       if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*reqLimitMins)
         throw new SimpleResponse(`You need to wait ${reqLimitMins} minute${reqLimitMins === 1 ? '' : 's'} in between song requests`, 429)
-      await this.callDb('PUT_ratelimit', null, {sessionToken, now})
+      await this.db.putRatelimit(sessionToken, now)
     }
     
     return this.setQ([...q, {id, votes: [this.votingToken]}])
@@ -157,7 +158,7 @@ export default class Handler {
   })
   adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => this.setQ(q.map(s => this.validateQItem(s, true))))
   adminSetRequestRateLimit = this.adminHandler(async (mins: number): Promise<void> => this.kv.put(keyRequestRateLimitMins, mins.toString()))
-  adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.callDb('DELETE_q'))
+  adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.db.deleteQ())
   adminAuthorize = this.adminHandler(async () => {}) // This method exists purely to validate whether we can show the admin dashboard
 
   private validateQItem(s: QItem, validateAvailable = false): QItem {
@@ -178,8 +179,10 @@ export default class Handler {
     return this.setQ(withUpdatedSort)
   }
 
-  private async getQ() {
-    return this.callDb('GET_q')
+  private async getQ(): Promise<Q> {
+    const q = await this.db.getQ()
+    if (!q) throw new SimpleResponse("Queue not found", 404)
+    return q
   }
 
   private async getSongInQ(id: string, q?: Q): Promise<QItem> {
@@ -190,7 +193,7 @@ export default class Handler {
   }
 
   private async setQ(q: Q): Promise<Q> {
-    await this.callDb('PUT_q', q)
+    await this.db.putQ(q)
     return q
   }
 
@@ -199,15 +202,4 @@ export default class Handler {
     return !!expected && expected === this.userName
   }
   
-  private async callDb<T extends keyof DbHandler> (call: T, ...args: Parameters<DbHandler[T]>) {
-    const [, method, path] = call.match(/(\w+)_(\w+)/) ?? []
-    const q = method === 'GET' ? args[0] : args[1]
-    const qStr = q ? `?${Object.entries(q as Dict<any>).map(([k,v]) => `${k}=${v}`).join('&')}` : ''
-    const resp = await this.durableB.fetch(`${this.domain}/${path}${qStr}`, {
-      method,
-      body: method !== 'GET' && args[0] ? JSON.stringify(args[0]) : undefined,
-    })
-    // todo: throw error if got error...?
-    return (resp.body ? resp.json() : null) as Awaited<ReturnType<DbHandler[T]>>
-  }
 }

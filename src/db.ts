@@ -1,66 +1,49 @@
-import { handleError, handleResult, parseReqInfo, SimpleResponse } from "./reqUtils";
-import { Dict, Env, Method, Q, RateLimitLookup } from "./types";
+import { DurableBServer } from "./DurableB";
+import { Env, Method, Q, RateLimitLookup } from "./types";
+
+export type DbParams = {domain: string}
 
 export class Db implements DurableObject {
-  private storage: DurableObjectStorage
+  private server: DurableBServer<DbHandler>
 
-  constructor(private state: DurableObjectState, env: Env) {
-    this.storage = state.storage
+  constructor(state: DurableObjectState, env: Env) {
+    this.server = new DurableBServer<DbHandler>(state.storage, DbHandler)
   }
 
   async fetch(request: Request): Promise<Response> {
-		try {
-			const reqInfo = await parseReqInfo(request)
-      const call = `${reqInfo.method}_${reqInfo.path}` as keyof DbHandler
-      const result = await this.handleCall(call, reqInfo.domain, reqInfo.method === 'GET' ? reqInfo.query : reqInfo.body, reqInfo.query)
-
-			return handleResult(result)
-		} catch (err) {
-			return handleError(err)
-		}
-  }
-
-  private async handleCall<T extends keyof DbHandler>(call: T, domain: string, body: any, query?: Dict<any>) {
-    const handler = new DbHandler(this.storage, domain)
-    if (!handler[call])
-      throw new SimpleResponse("Unknown method/path :(", 404)
-
-    return (handler[call] as any)(body, query) as Awaited<ReturnType<DbHandler[T]>>
+    return this.server.handleRequest(request)
   }
 }
 
 export class DbHandler {
-  private get qKey(): string { return `q_${this.domain}` }
-  private get rKey(): string { return `r_${this.domain}` }
+  private get qKey(): string { return `q_${this.params.domain}` }
+  private get rKey(): string { return `r_${this.params.domain}` }
 
-  constructor(private storage: DurableObjectStorage, private domain: string) {}
+  constructor(private storage: DurableObjectStorage, public params: {domain: string}) {}
 
-  async GET_q(): Promise<Q> {
-    const q = await this.storage.get<Q>(this.qKey, {}) // todo: JSON.parse?
-    if (!q)
-      throw new SimpleResponse("Queue not found", 404)
-    return q
+  async getQ(): Promise<Q|undefined> {
+    return await this.storage.get<Q>(this.qKey, {})
   }
-  async PUT_q(q: Q) {
+  async putQ(q: Q) {
     await this.storage.put(this.qKey, q)
   }
-  async DELETE_q() {
+  async deleteQ() {
     await this.storage.delete(this.qKey)
   }
 
-  async GET_ratelimit(q: {sessionToken: string}): Promise<number> {
-    return (await this.storage.get<RateLimitLookup>(this.rKey) ?? {})[q.sessionToken]
+  async getRatelimit(sessionToken: string): Promise<number> {
+    return (await this.storage.get<RateLimitLookup>(this.rKey) ?? {})[sessionToken]
   }
-  async PUT_ratelimit(_body: null, q: {sessionToken: string, now: number}) {
+  async putRatelimit(sessionToken: string, now: number) {
     const lookup = await this.storage.get<RateLimitLookup>(this.rKey) ?? {}
-    lookup[q.sessionToken] = q.now
+    lookup[sessionToken] = now
     await this.storage.put(this.rKey, lookup)
   }
 }
 
-type MethodNameForCall<T extends `${Method}_${string}`> = T extends `${infer M extends Method}_${string}` ? M : never
-
+// todo: integrate these checks somewhere more generally? (i.e. in DurableB)
+type MethodNameForCall<T extends `${Lowercase<Method>}${string}`> = T extends `${infer M extends Method}_${string}` ? M : never
 type InterfaceCheck = {
-  [K in keyof DbHandler as K extends `${Method}_${string}` ? K : `!!!${K}`]: Parameters<DbHandler[K]> extends (MethodNameForCall<K> extends 'GET' ? [query?: Dict<any>] : [body?: any, query?: Dict<any>]) ? true : false
+  [K in keyof DbHandler as K extends `${Lowercase<Method>}${string}` ? K : DbHandler[K] extends Function ? `!!!${K}` : K]: true
 }
 const _: InterfaceCheck extends Record<keyof DbHandler, true> ? true : false = true

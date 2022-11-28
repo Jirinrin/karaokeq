@@ -9,8 +9,10 @@
  */
 
 import Handler from "./handler";
-import { handleError, handleResult, parseReqInfo } from "./reqUtils";
+import { handleError, handleResult, parseReqInfoWithParams } from "./reqUtils";
 import { Env } from "./types";
+
+export { Db } from './db';
 
 export default {
 	async fetch(
@@ -26,12 +28,13 @@ export default {
 		}
 
 		try {
-			const reqInfo = await parseReqInfo(request)
+			const reqInfo = await parseReqInfoWithParams(request, '/:domain/*')
+			reqInfo.path = reqInfo.path.replace(/^[^\/]+\//, '') // Remove domain from the path
 
 			const userName = request.headers.get('Q-User-Name')
 			const sessionToken = request.headers.get('Q-Session')
 
-			const handler = new Handler(env, reqInfo.domain, userName, sessionToken)
+			const handler = new Handler(env, reqInfo.pathParams.domain, userName, sessionToken)
 			const result = await handler.handleRequest(reqInfo)
 
 			return handleResult(result, corsHeaders)

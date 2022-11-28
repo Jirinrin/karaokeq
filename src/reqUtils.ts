@@ -1,4 +1,4 @@
-import { Dict, Method, ReqInfo } from "./types";
+import { Dict, Method, PathParamsDict, ReqInfo } from "./types";
 
 export class SimpleResponse extends Response {
   constructor(public message: string, status: number = 200, init: ResponseInit|Response = {}) {
@@ -10,25 +10,35 @@ export class SimpleResponse extends Response {
   }
 }
 
+export async function parseReqInfoWithParams<P extends `/${string}`>(request: Request, pathPattern: P): Promise<ReqInfo<PathParamsDict<P>>> {
+  const reqInfo = await parseReqInfo(request)
+  const patternPathParts = pathPattern.slice(1).split(/\//g)
+  const pathParts = reqInfo.path.split(/\//g)
+  const paramsLookup = {} as Dict
+  patternPathParts.forEach((p, i) => {
+    const paramName = p.match(/:(\w+)/)?.[1]
+    if (paramName)
+      paramsLookup[paramName] = pathParts[i]
+  })
+
+  return { ...reqInfo, pathParams: paramsLookup as PathParamsDict<P> }
+}
+
 export async function parseReqInfo(request: Request): Promise<ReqInfo> {
   const url = new URL(request.url)
-  const [match, domain, path, q] = url.pathname.match(/\/([^\/]+)\/([^\/]+)(?:\?([^?]+))?/) ?? []
-  if (!match)
-    throw new SimpleResponse('Invalid request: path must look like e.g. /:domain/:path', 400)
-
   const method = request.method as Method
   const body = request.body && method !== 'OPTIONS' ? await request.json() : undefined
   return {
-    domain,
-    path,
+    path: url.pathname.slice(1),
+    pathParams: {},
     method,
     body,
-    query: q && Object.fromEntries(q.split('&').map(term => term.split('=')))
+    query: url.search ? Object.fromEntries([...url.searchParams.entries()]) : undefined
   }
 }
 
 export function handleResult(result: any, corsHeaders: Dict = {}): Response {
-  const resultStr: string = typeof result === 'object' ? JSON.stringify(result) : result && `${result}`
+  const resultStr: string|null|undefined = result !== undefined && result !== null ? JSON.stringify(result) : result
   return new Response(resultStr, {headers: {...corsHeaders}})
 }
 

@@ -3,12 +3,16 @@ export interface Env {
 	KARAOKEQ_DB: DurableObjectNamespace;
 }
 
-export type Method = 'GET'|'POST'|'PUT'|'DELETE'|'OPTIONS'
+export const validMethods = ['GET','POST','PUT','DELETE','OPTIONS'] as const
+export type Method = typeof validMethods[number]
 
 export type Dict<T = string> = Record<string, T>
 
-export interface ReqInfo {
-  domain: string
+type PathParams<T extends string> = T extends `${string}:${infer R}` ? R extends `${infer P}/${infer S}` ? P | PathParams<S> : R : never
+export type PathParamsDict<T extends string> = Record<PathParams<T>, string>
+
+export interface ReqInfo<PP extends Dict = {}> {
+  pathParams: PP
   path: string
   method: Method
   body: any
