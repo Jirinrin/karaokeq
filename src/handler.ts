@@ -15,6 +15,7 @@ const keyRequestRateLimitMins = 'requestRateLimitMins'
 export default class Handler {
   private kv: KVNamespace;
   private userName: string;
+  private adminToken: string|null;
   private sessionToken: string;
 
   private get aKey(): string { return `a_${this.domain}` }
@@ -26,9 +27,10 @@ export default class Handler {
 
   private db: DbHandler
 
-  constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null) {
+  constructor(env: Env, private domain: string, userName: string|null, sessionToken: string|null, adminToken: string|null) {
     this.kv = env.KARAOKEQ
     this.userName = userName ?? ''
+    this.adminToken = adminToken
     // todo: maybe also expect admin token separately? Or maybe just recommend the user to use a difficult to guess username on the queue creation thing
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
 
@@ -45,14 +47,17 @@ export default class Handler {
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
     if (is('POST',  'request'))   return this.requestSong(body.songId)
+    if (is('GET',   'req-rate-limit')) return this.requestRateLimitMins()
     if (method == 'OPTIONS')      return null
     // Admin handlers
     if (is('POST',  'reset'))     return this.adminResetQueue()
     if (is('POST',  'setvotes'))  return this.adminSetVotes(body.songId, body.votes)
+    if (is('POST',  'remove'))    return this.adminRemoveSongFromQueue(body.songId)
     if (is('PUT',   'q'))         return this.adminSetQueue(body.q)
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
     if (is('PUT',   'req-rate-limit')) return this.adminSetRequestRateLimit(body.minutes)
+    // todo: allow a websocket connection to continuously receive updates on the Q, for an admin or sth
 
 		throw new SimpleResponse("Unknown method/path :(", 404)
   }
@@ -103,9 +108,10 @@ export default class Handler {
     if (await this.db.getQ())
       throw new SimpleResponse('Domain already exists', 400)
 
-    if (this.userName)
-      await this.kv.put(this.aKey, this.userName)
+    if (!this.adminToken)
+      throw new SimpleResponse('You need to include the Q-Admin-Token header in your request', 400)
 
+    await this.kv.put(this.aKey, this.adminToken)
     return this.setQ(initial)
   }
 
@@ -113,7 +119,7 @@ export default class Handler {
     const q = await this.getQ()
     const s = await this.getSongInQ(id, q)
 
-    if (s.votes.includes(this.votingToken))
+    if (s.votes.includes(this.votingToken) && await this.isPeasant)
       throw new SimpleResponse('You already voted on this song', 405)
 
     return this.setVotes({id, votes: s.votes.concat(this.votingToken)}, q)
@@ -130,21 +136,26 @@ export default class Handler {
     if (reqLimitMins > 0 && !(await this.isAdmin())) {
       const {sessionToken, now} = this
       const lastUpdateBySession = await this.db.getRatelimit(sessionToken)
-      if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*reqLimitMins)
-        throw new SimpleResponse(`You need to wait ${reqLimitMins} minute${reqLimitMins === 1 ? '' : 's'} in between song requests`, 429)
+      if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*reqLimitMins) {
+        if (await this.isPeasant)
+          throw new SimpleResponse(`You need to wait ${reqLimitMins} minute${reqLimitMins === 1 ? '' : 's'} in between song requests`, 429)
+      }
       await this.db.putRatelimit(sessionToken, now)
     }
     
     return this.setQ([...q, {id, votes: [this.votingToken]}])
   }
 
+  private async verifyIsAdmin(): Promise<boolean> {
+    return await this.kv.get(this.aKey, {cacheTtl: 3600}) === this.adminToken
+  }
+  private get isPeasant(): Promise<boolean> {
+    return this.verifyIsAdmin().then(res => !res)
+  }
+
   private adminHandler = <CB extends (...args: any[]) => Promise<any>>(cb: CB): CB => 
     (async (...args: Parameters<CB>) => {
-      // todo: Nicely bodged but of course this could be more 'secure' if I'd want it to be
-      const expectedUserName = await this.kv.get(this.aKey, {cacheTtl: 3600})
-      if (!expectedUserName)
-        throw new SimpleResponse('No admin token exists for this queue', 403)
-      if (expectedUserName !== this.userName)
+      if (await this.isPeasant)
         throw new SimpleResponse('Incorrect admin token', 403)
       return cb(...args)
     }) as CB
@@ -153,8 +164,13 @@ export default class Handler {
   adminSetVotes = this.adminHandler(async (songId: string, votes: number): Promise<Q> => {
     if (typeof votes !== 'number') throw new SimpleResponse('votes must be number', 422)
     const q = await this.getQ()
-    await this.getSongInQ(songId, q) // validation that the song exists
-    return this.setVotes({id: songId, votes: Array(votes).fill(null).map(() => this.votingToken)}, q)
+    const s = await this.getSongInQ(songId, q) // validation that the song exists
+    const votess = votes < s.votes.length ? Array(votes).fill(this.votingToken) : [...s.votes, ...Array(votes-s.votes.length).fill(this.votingToken)]
+    return this.setVotes({id: songId, votes: votess}, q)
+  })
+  adminRemoveSongFromQueue = this.adminHandler(async (songId: string): Promise<Q> => {
+    const q = await this.getQ()
+    return this.setQ(q.filter(s => s.id !== songId))
   })
   adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => this.setQ(q.map(s => this.validateQItem(s, true))))
   adminSetRequestRateLimit = this.adminHandler(async (mins: number): Promise<void> => this.kv.put(keyRequestRateLimitMins, mins.toString()))

@@ -22,7 +22,7 @@ export default {
 	): Promise<Response> {
 		const corsHeaders = {
 			'Access-Control-Allow-Origin': '*',
-			'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
+			'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,OPTIONS',
 			'Access-Control-Max-Age': '86400',
 			'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers') ?? '',
 		}
@@ -33,8 +33,9 @@ export default {
 
 			const userName = request.headers.get('Q-User-Name')
 			const sessionToken = request.headers.get('Q-Session')
+			const adminToken = request.headers.get('Q-Admin-Token')
 
-			const handler = new Handler(env, reqInfo.pathParams.domain, userName, sessionToken)
+			const handler = new Handler(env, reqInfo.pathParams.domain, userName, sessionToken, adminToken)
 			const result = await handler.handleRequest(reqInfo)
 
 			return handleResult(result, corsHeaders)

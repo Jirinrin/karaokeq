@@ -4,5 +4,12 @@ compatibility_date = "2022-09-10"
 
 [[kv_namespaces]]
   binding = "KARAOKEQ"
-  id = "0e999fcef5e94b72b3b5d9d9b9d1ba30"
-  preview_id = "0e999fcef5e94b72b3b5d9d9b9d1ba30"
+  id = "b21515f834af4f55a728a5465cbcc471"
+  preview_id = "b21515f834af4f55a728a5465cbcc471"
+  
+[durable_objects]
+  bindings = [{ name = "KARAOKEQ_DB", class_name = "Db" }]
+
+[[migrations]]
+  tag = "v1"
+  new_classes = ["Db"]

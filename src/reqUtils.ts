@@ -27,7 +27,7 @@ export async function parseReqInfoWithParams<P extends `/${string}`>(request: Re
 export async function parseReqInfo(request: Request): Promise<ReqInfo> {
   const url = new URL(request.url)
   const method = request.method as Method
-  const body = request.body && method !== 'OPTIONS' ? await request.json() : undefined
+  const body = request.headers.get('content-type') && method !== 'OPTIONS' ? await request.json() : undefined
   return {
     path: url.pathname.slice(1),
     pathParams: {},
