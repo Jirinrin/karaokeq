@@ -16,12 +16,12 @@ export class DurableBClient<T extends DurableBHandler, M = Methods<T>> {
     const resp = await this.stub.fetch(`${this.baseUrl}/${String(call)}${q}`, {
       method: 'POST', // todo: okay so it's now just always POST for ease sake, but i sure hope this doesn't make 'get' calls count towards class A requests...
       body,
-      ...(body ? {'content-type': 'application/json'} : {})
+      headers: { ...(body ? {'content-type': 'application/json', 'content-length': body.length} : {}) } as Dict
     })
     if (!resp.ok) {
       throw new SimpleResponse(await resp.text(), resp.status)
     }
-    return (resp.headers.get('content-type') ? resp.json() : null) as Awaited<ReturnTypeLenient<M[K]>>
+    return ((resp.headers.get('content-length') ?? 0) > 0 ? resp.json() : null) as Awaited<ReturnTypeLenient<M[K]>>
   }
 }
 
