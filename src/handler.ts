@@ -87,6 +87,7 @@ export default class Handler {
       q = [{id: currentSongId, votes: ['admin_']}, ...q]
       await this.setQ(q)
     } else if (currentSongIndex > 0) {
+      const currentSong = q[currentSongIndex]
       // currentSongId found later in the queue than the first place ->
       // go through the songs before the current song in the queue (this will usually be nothing, but in case a song was played after an internet outage etc.),
       // and remove them from the queue if they have already been played in the last 5 or so songs
@@ -97,7 +98,7 @@ export default class Handler {
       }
       q = qCopy.filter((s): s is QItem => !!s)
       // always move current song to front
-      q = [{id: currentSongId, votes: ['admin_']}, ...q.filter(s => s.id !== currentSongId)]
+      q = [currentSong, ...q.filter(s => s.id !== currentSongId)]
       await this.setQ(q)
     }
     // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
