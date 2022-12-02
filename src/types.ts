@@ -3,7 +3,7 @@ export interface Env {
 	KARAOKEQ_DB: DurableObjectNamespace;
 }
 
-export const validMethods = ['GET','POST','PUT','DELETE','OPTIONS'] as const
+export const validMethods = ['GET','POST','PUT','PATCH','DELETE','OPTIONS'] as const
 export type Method = typeof validMethods[number]
 
 export type Dict<T = string> = Record<string, T>
@@ -21,8 +21,10 @@ export interface ReqInfo<PP extends Dict = {}> {
 
 /** username_sessiontoken */
 export type VoteToken = `${string}_${string}`
-export type QItem = {id: string; votes: VoteToken[]}
+export type QItem = {id: string; requestedAt: number; waitingVotes: number; votes: VoteToken[]}
 export type Q = QItem[]
 
 /** Session token -> last time they requested something (epochmillis) */
 export type RateLimitLookup = Record<string, number>
+
+export type Config = { requestRateLimitMins: number, waitingVoteBonus: number }

@@ -2,7 +2,7 @@ import { DbHandler } from './db';
 import { DurableBClient, makeClientProxy } from './DurableB';
 import { SimpleResponse } from './reqUtils';
 import songlist from './songlist.json';
-import { Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
+import { Config, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).sort()
@@ -10,7 +10,10 @@ const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').f
 const fillSong = 'Rick Astley : Never Gonna Give You Up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
 
-const keyRequestRateLimitMins = 'requestRateLimitMins'
+const DEFAULT_CONFIG: Config = {requestRateLimitMins: 0, waitingVoteBonus: 0.5}
+
+const qItem = (id: string, votes: VoteToken[] = ['admin_']): QItem => ({id, votes, waitingVotes: 0, requestedAt: Date.now()})
+const setVotes = (item: QItem, votes: VoteToken[]) => ({...item, votes})
 
 export default class Handler {
   private kv: KVNamespace;
@@ -19,11 +22,18 @@ export default class Handler {
   private sessionToken: string;
 
   private get aKey(): string { return `a_${this.domain}` }
+  private get cKey(): string { return `c_${this.domain}` }
   private get votingToken(): VoteToken { return `${this.userName}_${this.sessionToken}` }
   private get now() { return Date.now() }
 
-  private _requestRateLimitMins: number|null = null
-  private async requestRateLimitMins(): Promise<number> { return this._requestRateLimitMins ??= (await this.kv.get<number>(keyRequestRateLimitMins, {type: 'json', cacheTtl: 300}) ?? 0) }
+  private _config: Config|null = null
+  private async config(): Promise<Config> {
+    // todo: it feels a bit weird to cache this indefinitely... it only works because the Handler class only lasts for 1 request
+    if (!this._config)
+      // (backwards compatible (ish) because unknown properties are made based on the DEFAULT_CONFIG)
+      this._config = {...DEFAULT_CONFIG, ...(await this.kv.get<Config>(this.cKey, {type: 'json', cacheTtl: 300}) ?? {})}
+    return this._config 
+  }
 
   private db: DbHandler
 
@@ -31,7 +41,6 @@ export default class Handler {
     this.kv = env.KARAOKEQ
     this.userName = userName ?? ''
     this.adminToken = adminToken
-    // todo: maybe also expect admin token separately? Or maybe just recommend the user to use a difficult to guess username on the queue creation thing
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
 
     const dbObjId = env.KARAOKEQ_DB.idFromName('karaokeq_db')
@@ -47,7 +56,7 @@ export default class Handler {
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
     if (is('POST',  'request'))   return this.requestSong(body.songId)
-    if (is('GET',   'req-rate-limit')) return this.requestRateLimitMins()
+    if (is('GET',   'config'))    return this.config()
     if (method == 'OPTIONS')      return null
     // Admin handlers
     if (is('POST',  'reset'))     return this.adminResetQueue()
@@ -56,7 +65,7 @@ export default class Handler {
     if (is('PUT',   'q'))         return this.adminSetQueue(body.q)
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
-    if (is('PUT',   'req-rate-limit')) return this.adminSetRequestRateLimit(body.minutes)
+    if (is('PATCH', 'config'))    return this.adminSetConfig(body)
     // todo: allow a websocket connection to continuously receive updates on the Q, for an admin or sth
 
 		throw new SimpleResponse("Unknown method/path :(", 404)
@@ -80,11 +89,13 @@ export default class Handler {
     if (typeof currentSongId != 'string')
       throw new SimpleResponse('No currentSongId specified', 400)
 
+    // todo: force 5sec waiting time through a timeout here...?
+
     let q = await this.getQ()
     const currentSongIndex = q.findIndex(s => s.id === currentSongId)
     if (currentSongIndex === -1 && currentSongId !== availableSongIds[0] && currentSongId !== fillSong) {
       // currentSongId not found in queue -> adding it to the front
-      q = [{id: currentSongId, votes: ['admin_']}, ...q]
+      q = [qItem(currentSongId), ...q]
       await this.setQ(q)
     } else if (currentSongIndex > 0) {
       const currentSong = q[currentSongIndex]
@@ -99,6 +110,10 @@ export default class Handler {
       q = qCopy.filter((s): s is QItem => !!s)
       // always move current song to front
       q = [currentSong, ...q.filter(s => s.id !== currentSongId)]
+      // add waiting votes so that a song doesn't stay at the bottom forever
+      const {waitingVoteBonus} = await this.config()
+      q = q.map(s => ({...s, waitingVotes: s.waitingVotes + waitingVoteBonus}))
+      
       await this.setQ(q)
     }
     // Just fill out the list because ultrastar has some glitchy behaviour which causes it to break if there's not at least 10 items in the list
@@ -123,7 +138,7 @@ export default class Handler {
     if (s.votes.includes(this.votingToken) && await this.isPeasant)
       throw new SimpleResponse('You already voted on this song', 405)
 
-    return this.setVotes({id, votes: s.votes.concat(this.votingToken)}, q)
+    return this.updateItemInQ(setVotes(s, s.votes.concat(this.votingToken)), q)
   }
 
   async requestSong(id: string): Promise<Q> {
@@ -133,18 +148,18 @@ export default class Handler {
     if (q.find(s => s.id === id))
       throw new SimpleResponse('Song already in queue: ' + id, 400)
 
-    const reqLimitMins = await this.requestRateLimitMins()
-    if (reqLimitMins > 0 && !(await this.isAdmin())) {
+    const {requestRateLimitMins: ratelimit} = await this.config()
+    if (ratelimit > 0 && !(await this.isAdmin())) {
       const {sessionToken, now} = this
       const lastUpdateBySession = await this.db.getRatelimit(sessionToken)
-      if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*reqLimitMins) {
+      if (lastUpdateBySession && now - lastUpdateBySession < (1000*60)*ratelimit) {
         if (await this.isPeasant)
-          throw new SimpleResponse(`You need to wait ${reqLimitMins} minute${reqLimitMins === 1 ? '' : 's'} in between song requests`, 429)
+          throw new SimpleResponse(`You need to wait ${ratelimit} minute${ratelimit === 1 ? '' : 's'} in between song requests`, 429)
       }
       await this.db.putRatelimit(sessionToken, now)
     }
     
-    return this.setQ([...q, {id, votes: [this.votingToken]}])
+    return this.setQ([...q, qItem(id, [this.votingToken])])
   }
 
   private async verifyIsAdmin(): Promise<boolean> {
@@ -167,14 +182,13 @@ export default class Handler {
     const q = await this.getQ()
     const s = await this.getSongInQ(songId, q) // validation that the song exists
     const votess = votes < s.votes.length ? Array(votes).fill(this.votingToken) : [...s.votes, ...Array(votes-s.votes.length).fill(this.votingToken)]
-    return this.setVotes({id: songId, votes: votess}, q)
+    return this.updateItemInQ(setVotes(s, votess), q)
   })
   adminRemoveSongFromQueue = this.adminHandler(async (songId: string): Promise<Q> => {
-    const q = await this.getQ()
-    return this.setQ(q.filter(s => s.id !== songId))
+    return this.setQ((await this.getQ()).filter(s => s.id !== songId))
   })
   adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => this.setQ(q.map(s => this.validateQItem(s, true))))
-  adminSetRequestRateLimit = this.adminHandler(async (mins: number): Promise<void> => this.kv.put(keyRequestRateLimitMins, mins.toString()))
+  adminSetConfig = this.adminHandler(async (c: Partial<Config>): Promise<void> => this.kv.put(this.cKey, JSON.stringify({...(await this.config), ...c})))
   adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.db.deleteQ())
   adminAuthorize = this.adminHandler(async () => {}) // This method exists purely to validate whether we can show the admin dashboard
 
@@ -189,10 +203,13 @@ export default class Handler {
       throw new SimpleResponse('Song not available: ' + id, 404)
   }
 
-  private async setVotes(updatedSong: QItem, q: Q): Promise<Q> {
+  private async updateItemInQ(updatedSong: QItem, q: Q): Promise<Q> {
     this.validateQItem(updatedSong)
-    const withUpdatedVote = (q ?? await this.getQ()).map(s => s.id === updatedSong.id ? updatedSong : s)
-    const withUpdatedSort = [withUpdatedVote[0], ...withUpdatedVote.slice(1,2), ...withUpdatedVote.slice(2).sort((a,b) => b.votes.length-a.votes.length)]
+    const withUpdatedSong = (q ?? await this.getQ()).map(s => s.id === updatedSong.id ? updatedSong : s)
+    const withUpdatedSort = [
+      withUpdatedSong[0], ...withUpdatedSong.slice(1,2),
+      ...withUpdatedSong.slice(2).sort((a,b) => (b.votes.length+b.waitingVotes)-(a.votes.length+a.waitingVotes))
+    ]
     return this.setQ(withUpdatedSort)
   }
 
@@ -224,5 +241,4 @@ export default class Handler {
     const expected = await this.kv.get(this.aKey, {cacheTtl: 3600})
     return !!expected && expected === this.userName
   }
-  
 }

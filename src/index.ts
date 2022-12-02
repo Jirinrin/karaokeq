@@ -22,7 +22,7 @@ export default {
 	): Promise<Response> {
 		const corsHeaders = {
 			'Access-Control-Allow-Origin': '*',
-			'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,OPTIONS',
+			'Access-Control-Allow-Methods': 'GET,HEAD,POST,PUT,PATCH,OPTIONS',
 			'Access-Control-Max-Age': '86400',
 			'Access-Control-Allow-Headers': req.headers.get('Access-Control-Request-Headers') ?? '',
 		}
