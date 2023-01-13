@@ -1,11 +1,11 @@
-import { DbHandler } from './db';
 import { DurableBClient, makeClientProxy } from './DurableB';
+import { DbHandler } from './db';
 import { SimpleResponse } from './reqUtils';
 import songlist from './songlist.json';
 import { Config, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
-const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).sort()
+const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).map(s => s.id).sort()
 
 const fillSong = 'Rick Astley : Never Gonna Give You Up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
@@ -56,7 +56,7 @@ export default class Handler {
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
     if (is('POST',  'request'))   return this.requestSong(body.songId)
-    if (is('GET',   'config'))    return this.config()
+    if (is('GET',   'config'))    return this.config() // todo: return proper cache headers
     if (method == 'OPTIONS')      return null
     // Admin handlers
     if (is('POST',  'reset'))     return this.adminResetQueue()
