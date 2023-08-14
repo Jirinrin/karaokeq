@@ -6,8 +6,7 @@
    3. Edit the `config.ini` file in your ultrastar folder like this:
       - Under `[Directories]` edit the list so that it looks like `SongDir1=songs/w-dance SongDir2=songs/w-modern` etc. covering all folders existing in your songs directory
       - Under `[Jukebox]` edit `ServerUrl=https://karaokeq.q42.workers.dev/jiri` to be `ServerUrl=https://karaokeq.q42.workers.dev/myfriendgroup`
-3. Creating the `myfriendgroup` environment
-   1. Do a post request to `https://karaokeq.q42.workers.dev/jiri/create`
+3. Creating the `myfriendgroup` environment: do a POST request to `https://karaokeq.q42.workers.dev/jiri/create`, with the Q-Admin-Token header set to a passphrase you will use as an administrator of the environment.
 4. Regular usage
    - Boot up Ultrastar (the `ultrastardx.exe` file in the ultrastar folder, feel free to create a shortcut to this file) -> Jukebox -> Press Enter ('All songs' is fine)
    - Ultrastar will be syncing its queue with the server for your custom environment!
