@@ -2,7 +2,7 @@
 1. What's going to be your sub URL? For our example this will be `myfriendgroup`
 2. Install ultrastar on your computer with the right songs
    1. [Download this custom version of Ultrastar Deluxe](foobar.com), and extract it where you want on your Windows computer
-   2. Download all necessary songs from [this cloud directory](https://mega.nz/folder/rJEFmTbC#p6WMO-qkitIubDD1BdwALA). Don't download the folders starting with `_`. Put them in your `songs/` directory in the ultrastar folder.
+   2. Download all necessary songs from [this cloud directory](https://mega.nz/folder/______________). Don't download the folders starting with `_`. Put them in your `songs/` directory in the ultrastar folder.
    3. Edit the `config.ini` file in your ultrastar folder like this:
       - Under `[Directories]` edit the list so that it looks like `SongDir1=songs/w-dance SongDir2=songs/w-modern` etc. covering all folders existing in your songs directory
       - Under `[Jukebox]` edit `ServerUrl=https://karaokeq.q42.workers.dev/jiri` to be `ServerUrl=https://karaokeq.q42.workers.dev/myfriendgroup`
