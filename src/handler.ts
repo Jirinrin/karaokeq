@@ -1,5 +1,6 @@
 import { DurableBClient, makeClientProxy } from './DurableB';
 import { DbHandler } from './db';
+import { getRandomName } from './randomName';
 import { SimpleResponse } from './reqUtils';
 import songlist from './songlist.json';
 import { Config, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
@@ -39,7 +40,7 @@ export default class Handler {
 
   constructor(env: Env, baseUrl: string, private domain: string, userName: string|null, sessionToken: string|null, adminToken: string|null) {
     this.kv = env.KARAOKEQ
-    this.userName = userName ?? ''
+    this.userName = userName || `Anonymous ${sessionToken ? getRandomName(sessionToken) : 'Dummy'}`
     this.adminToken = adminToken
     this.sessionToken = sessionToken ?? '' // If you manage to not send this header then you're in the same boat as the other who didn't think to send it
 
