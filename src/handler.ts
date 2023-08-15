@@ -8,7 +8,7 @@ import { Config, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
 const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).map(s => s.id).sort()
 
-const fillSong = 'The Champs : Tequila'
+const fillSong = 'Rick Astley : Never gonna give you up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
 
 const DEFAULT_CONFIG: Config = {requestRateLimitMins: 0, waitingVoteBonus: 0.5}
