@@ -12,6 +12,7 @@ type PathParams<T extends string> = T extends `${string}:${infer R}` ? R extends
 export type PathParamsDict<T extends string> = Record<PathParams<T>, string>
 
 export interface ReqInfo<PP extends Dict = {}> {
+  _req: Request
   pathParams: PP
   path: string
   method: Method

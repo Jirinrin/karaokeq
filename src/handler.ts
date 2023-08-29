@@ -2,11 +2,9 @@ import { DurableBClient, makeClientProxy } from './DurableB';
 import { DbHandler } from './db';
 import { getRandomName } from './randomName';
 import { SimpleResponse } from './reqUtils';
-import songlist from './songlist.json';
-import { Config, Env, Method, Q, QItem, ReqInfo, VoteToken } from "./types";
+import { Config, Env, Method, Q, QItem, ReqInfo, SongList, VoteToken } from "./types";
 
 // todo: possibly store this in kv so it's possible to get (override) a different song list per domain
-const availableSongIds = Object.keys(songlist).filter(k => k !== 'unincluded').flatMap(k => songlist[k as keyof typeof songlist]).map(s => s.id).sort()
 
 const fillSong = 'Rick Astley : Never gonna give you up'
 // const fillSong = 'Yumi Kimura : Itsumo Nando Demo'
@@ -22,8 +20,13 @@ export default class Handler {
   private adminToken: string|null;
   private sessionToken: string;
 
+  /** For admin password */
   private get aKey(): string { return `a_${this.domain}` }
+  /** For config */
   private get cKey(): string { return `c_${this.domain}` }
+  /** For songlist */
+  private get sKey(): string { return `s_${this.domain}` }
+
   private get votingToken(): VoteToken { return `${this.userName}_${this.sessionToken}` }
   private get now() { return Date.now() }
 
@@ -33,7 +36,7 @@ export default class Handler {
     if (!this._config)
       // (backwards compatible (ish) because unknown properties are made based on the DEFAULT_CONFIG)
       this._config = {...DEFAULT_CONFIG, ...(await this.kv.get<Config>(this.cKey, {type: 'json', cacheTtl: 300}) ?? {})}
-    return this._config 
+    return this._config!
   }
 
   private db: DbHandler
@@ -54,6 +57,7 @@ export default class Handler {
     if (is('GET',   'q-simple'))  return this.getSimpleQueue()
     if (is('POST',  'q-simple'))  return this.getUpdatedSimpleQueue(body.currentSongId, body.songIdHistory ?? [])
     if (is('GET',   'q'))         return this.getQueue()
+    if (is('GET',   'songlist.json')) return this.getSonglist()
     if (is('POST',  'create'))    return this.createQueue()
     if (is('POST',  'vote'))      return this.voteSong(body.songId)
     if (is('POST',  'request'))   return this.requestSong(body.songId)
@@ -67,6 +71,7 @@ export default class Handler {
     if (is('DELETE','q'))         return this.adminDeleteQueue()
     if (is('POST',  'authorize')) return this.adminAuthorize()
     if (is('PATCH', 'config'))    return this.adminSetConfig(body)
+    if (is('POST',  'songlist.json')) return this.adminSetSonglist(body)
     // todo: allow a websocket connection to continuously receive updates on the Q, for an admin or sth
 
 		throw new SimpleResponse("Unknown method/path :(", 404)
@@ -79,6 +84,14 @@ export default class Handler {
 
   async getQueue(): Promise<Q> {
     return this.getQ()
+  }
+
+  async getSonglist(): Promise<Response|SongList> {
+    const csl = await this.getCachedSonglist()
+    if (csl) return csl
+    const sl = await this.kv.get<SongList>(this.sKey, {type: 'json', cacheTtl: 300}) ?? {}
+    await this.cacheSonglist(sl)
+    return sl
   }
 
   // async getQueueWS(): Promise<Q> {
@@ -94,7 +107,7 @@ export default class Handler {
 
     let q = await this.getQ()
     const currentSongIndex = q.findIndex(s => s.id === currentSongId)
-    if (currentSongIndex === -1 && currentSongId !== availableSongIds[0] && currentSongId !== fillSong) {
+    if (currentSongIndex === -1 && currentSongId !== (await this.getAvailableSongIds())[0] && currentSongId !== fillSong) {
       // currentSongId not found in queue -> adding it to the front
       q = [qItem(currentSongId), ...q]
       await this.setQ(q)
@@ -143,7 +156,7 @@ export default class Handler {
   }
 
   async requestSong(id: string): Promise<Q> {
-    this.validateSongAvailable(id)
+    this.validateSongAvailable(id, await this.getAvailableSongIds())
     
     const q = await this.getQ()
     if (q.find(s => s.id === id))
@@ -188,18 +201,26 @@ export default class Handler {
   adminRemoveSongFromQueue = this.adminHandler(async (songId: string): Promise<Q> => {
     return this.setQ((await this.getQ()).filter(s => s.id !== songId))
   })
-  adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => this.setQ(q.map(s => this.validateQItem(s, true))))
-  adminSetConfig = this.adminHandler(async (c: Partial<Config>): Promise<void> => this.kv.put(this.cKey, JSON.stringify({...(await this.config), ...c})))
+  adminSetQueue = this.adminHandler(async (q: Q): Promise<Q> => {
+    const availableSongIds = await this.getAvailableSongIds()
+    return this.setQ(q.map(s => this.validateQItem(s, availableSongIds)));
+  })
+  adminSetConfig = this.adminHandler(async (c: Partial<Config>): Promise<void> => this.kv.put(this.cKey, JSON.stringify({...(await this.config()), ...c})))
+  adminSetSonglist = this.adminHandler(async (s: SongList): Promise<void> => {
+    await this.kv.put(this.sKey, JSON.stringify(s))
+    await this.cacheSonglist(s)
+  })
   adminDeleteQueue = this.adminHandler(async (): Promise<void> => this.db.deleteQ())
   adminAuthorize = this.adminHandler(async () => {}) // This method exists purely to validate whether we can show the admin dashboard
 
-  private validateQItem(s: QItem, validateAvailable = false): QItem {
+  private validateQItem(s: QItem, availableSongIds?: string[]): QItem {
     if (typeof s.id !== 'string' || !s.votes.every(v => v.match(/_/)))
       throw new SimpleResponse('Invalid q item: ' + JSON.stringify(s), 422)
-    if (validateAvailable) this.validateSongAvailable(s.id)
+    if (availableSongIds)
+      this.validateSongAvailable(s.id, availableSongIds)
     return s
   }
-  private validateSongAvailable(id: string) {
+  private validateSongAvailable(id: string, availableSongIds: string[]) {
     if (!availableSongIds.includes(id))
       throw new SimpleResponse('Song not available: ' + id, 404)
   }
@@ -236,6 +257,23 @@ export default class Handler {
   private async setQ(q: Q): Promise<Q> {
     await this.db.putQ(q)
     return q
+  }
+
+  private async cacheSonglist(sl: SongList) {
+    // todo: perhaps add some cache headers if this doesn't work well enough (see https://developers.cloudflare.com/workers/runtime-apis/cache/#headers)
+    await caches.open(this.domain).then(c => c.put('songlist.json', new Response(JSON.stringify(sl), {headers: {'content-type': 'application/json',}})))
+  }
+  private async getCachedSonglist(): Promise<Response|undefined> {
+    return caches.open(this.domain).then(c => c.match('songlist.json'))
+  }
+  private async getSonglistt(): Promise<SongList> {
+    const sl = await this.getSonglist()
+    return sl instanceof Response ? sl.json() : sl
+  }
+  private async getAvailableSongIds() {
+    // todo: how likely is this to throw...? If it can throw that's going to be something of a pain
+    const sl = await this.getSonglistt()
+    return Object.keys(sl).filter(k => k !== 'unincluded').flatMap(k => sl[k as keyof typeof sl]).map(s => s.id).sort()
   }
 
   private async isAdmin(): Promise<boolean> {

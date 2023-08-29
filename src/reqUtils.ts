@@ -27,8 +27,9 @@ export async function parseReqInfoWithParams<P extends `/${string}`>(request: Re
 export async function parseReqInfo(req: Request): Promise<ReqInfo> {
   const url = new URL(req.url)
   const method = req.method as Method
-  const body = (req.headers.get('content-type') || (req.headers.get('content-length') ?? 0) > 0) && method !== 'OPTIONS' ? await req.json() : undefined
+  const body = (req.headers.get('content-type') || hasContentLength(req)) && method !== 'OPTIONS' ? await req.json() : undefined
   return {
+    _req: req,
     path: url.pathname.slice(1),
     pathParams: {},
     method,
@@ -37,7 +38,15 @@ export async function parseReqInfo(req: Request): Promise<ReqInfo> {
   }
 }
 
+export function hasContentLength(r: Request|Response): boolean {
+  const cl = r.headers.get('content-length')
+  return !!(cl?.match(/^\d+$/) && cl !== '0')
+}
+
 export function handleResult(result: any, corsHeaders: Dict = {}): Response {
+  if (result instanceof Response) {
+    new Response(null, {...result, headers: {...result.headers, ...corsHeaders}})
+  }
   const resultStr: string|null|undefined = result !== undefined && result !== null && typeof result !== 'string' ? JSON.stringify(result) : result
   return new Response(resultStr, {headers: {...corsHeaders}})
 }

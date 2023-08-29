@@ -1,4 +1,4 @@
-import { handleError, handleResult, parseReqInfo, SimpleResponse } from "./reqUtils";
+import { handleError, handleResult, hasContentLength, parseReqInfo, SimpleResponse } from "./reqUtils";
 import { Dict } from "./types";
 
 type Methods<T> = {[K in keyof T as T[K] extends (...args: any) => any ? K : never]: T[K]}
@@ -21,7 +21,7 @@ export class DurableBClient<T extends DurableBHandler, M = Methods<T>> {
     if (!resp.ok) {
       throw new SimpleResponse(await resp.text(), resp.status)
     }
-    return (resp.headers.get('content-type') || (resp.headers.get('content-length') ?? 0) > 0 ? resp.json() : null) as Awaited<ReturnTypeLenient<M[K]>>
+    return (resp.headers.get('content-type') || hasContentLength(resp) ? resp.json() : null) as Awaited<ReturnTypeLenient<M[K]>>
   }
 }
 
