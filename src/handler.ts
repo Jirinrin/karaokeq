@@ -261,10 +261,10 @@ export default class Handler {
 
   private async cacheSonglist(sl: SongList) {
     // todo: perhaps add some cache headers if this doesn't work well enough (see https://developers.cloudflare.com/workers/runtime-apis/cache/#headers)
-    await caches.open(this.domain).then(c => c.put('songlist.json', new Response(JSON.stringify(sl), {headers: {'content-type': 'application/json',}})))
+    await caches.open(this.domain).then(c => c.put('https://karaokeq.q42.workers.dev/songlist.json', new Response(JSON.stringify(sl), {headers: {'content-type': 'application/json',}})))
   }
   private async getCachedSonglist(): Promise<Response|undefined> {
-    return caches.open(this.domain).then(c => c.match('songlist.json'))
+    return caches.open(this.domain).then(c => c.match('https://karaokeq.q42.workers.dev/songlist.json'))
   }
   private async getSonglistt(): Promise<SongList> {
     const sl = await this.getSonglist()
