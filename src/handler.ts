@@ -88,7 +88,8 @@ export default class Handler {
 
   async getSonglist(): Promise<Response|SongList> {
     const csl = await this.getCachedSonglist()
-    if (csl) return csl
+    // todo: will this properly work as a cache...? i dunno man
+    if (csl) return await csl.json() as SongList
     const sl = await this.kv.get<SongList>(this.sKey, {type: 'json', cacheTtl: 300}) ?? {}
     await this.cacheSonglist(sl)
     return sl
