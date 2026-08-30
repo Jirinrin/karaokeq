@@ -1,6 +1,6 @@
 # KARAOKEQ
 
-For the frontend part, see [KARAOKEQ](https://github.com/Jirinrin/karaokeq-web)
+For the frontend part, see [KARAOKEQ WEB](https://github.com/Jirinrin/karaokeq-web)
 
 
 ## TODOs
